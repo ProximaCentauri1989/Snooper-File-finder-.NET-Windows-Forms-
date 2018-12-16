@@ -1,0 +1,45 @@
+        //Загрузить XML в таблицу ассинхронно
+        private async void ShowTableAsync(XDocument doc)
+        {
+
+            if (doc != null)
+            {
+                var progress = new Progress<ListViewItem>(item => listView1.Items.Add(item));
+                int count = await ReadXMLDoc(doc, progress);
+                MessageBox.Show(this, "Всего " + count.ToString() + " записей загружено!", "Инфо", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }        
+
+	      //Читать документ и отображать в списке
+        private Task<int> ReadXMLDoc(XDocument doc, IProgress<ListViewItem> progress)
+        {
+            //LINQ-запрос к XML-документу (выбрать записи)
+            var rowSet = from record in doc.Descendants("FileInfo")
+                         select record;
+	    
+            //LINQ-запрос к XML-документу (подсчет записей)
+            int amountOfFiles = (from record in doc.Descendants("FileInfo")
+                                 select record).Count();
+
+            //Перебор записей в XML-документе с помощью LINQ-запроса
+            foreach (var row in rowSet)
+            {
+                XElement path = row.Element("Path");
+                XElement name = row.Element("Name");
+                XElement size = row.Element("Size");
+                XElement extention = row.Element("Extention");
+                XElement crDate = row.Element("CreationDate");
+
+                var nextItem = new ListViewItem(new[]
+                {
+                        path.Value,
+                        name.Value,
+                        size.Value,
+                        extention.Value,
+                        crDate.Value
+                });
+
+                progress.Report(nextItem); //поместить очередную запись в список в основнмо потоке
+            }
+            return Task.FromResult(amountOfFiles); //вернуть количество считанным записей
+        }
