@@ -39,7 +39,7 @@
                         crDate.Value
                 });
 
-                progress.Report(nextItem); //поместить очередную запись в список в основнмо потоке
+                progress.Report(nextItem); //поместить очередную запись в список в основном потоке
             }
             return Task.FromResult(amountOfFiles); //вернуть количество считанным записей
         }
