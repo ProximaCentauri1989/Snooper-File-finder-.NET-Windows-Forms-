@@ -10,7 +10,7 @@ private void SaveResultToXML(ListViewItem[] listItems, string xmlFN)
      //1. Подготовить обобщенный делегат Func
      Func<string, ListViewItem[], int> delegateSaveXML = new Func<string, ListViewItem[], int>(SaveXMLAsync);
 
-     //2. Запустить сохранение ассинхронно (используя поток из пула свободных потоков)
+     //2. Запустить сохранение асинхронно (используя поток из пула свободных потоков)
      delegateSaveXML.BeginInvoke(xmlFN, listItems, new AsyncCallback(SaveComplete), null);
  }
 
