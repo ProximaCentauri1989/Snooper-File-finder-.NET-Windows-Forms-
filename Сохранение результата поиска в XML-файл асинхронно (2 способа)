@@ -1,0 +1,140 @@
++-+-+-+-+-+-+-Способ 1. Используя ассинхронную природу делегатов (без создания нового потока вручную)-+-+-+-+-+-
+
+SaveResultToXML(items, xmlFileName); //Вызов функции сохранения
+
+//Подготовка делегата и ассинхронный вызов
+private void SaveResultToXML(ListViewItem[] listItems, string xmlFN)
+{
+     //Сохранение записей в файл выполнить во вторичном потоке
+
+     //1. Подготовить обобщенный делегат Func
+     Func<string, ListViewItem[], int> delegateSaveXML = new Func<string, ListViewItem[], int>(SaveXMLAsync);
+
+     //2. Запустить сохранение ассинхронно (используя поток из пула свободных потоков)
+     delegateSaveXML.BeginInvoke(xmlFN, listItems, new AsyncCallback(SaveComplete), null);
+ }
+
+//Формирование XML-файла во вторичном потоке
+private int SaveXMLAsync(string xmlName, ListViewItem[] lwi)
+{
+     int rowID = 0; //ID файла в документе
+
+     //Создать новый XML-документ с главным тэгом
+     XElement seacrhSessionDoc = new XElement("SearchResult");
+
+     //Каждую строку добавить в XML-документ
+     foreach (ListViewItem row in lwi)
+     {
+           XElement newElement = new XElement("FileInfo", new XAttribute("ID", rowID.ToString()),
+                    new XElement("Path", row.SubItems[0].Text),
+                    new XElement("Name", row.SubItems[1].Text),
+                    new XElement("Size", row.SubItems[2].Text),
+                    new XElement("Extention", row.SubItems[3].Text),
+                    new XElement("CreationDate", row.SubItems[4].Text));
+
+           seacrhSessionDoc.Add(newElement);
+           rowID++;
+     }
+
+     //Сохранить XML-документ
+     string savePath = GetSavePath(xmlName);
+     seacrhSessionDoc.Save(savePath);
+
+     return rowID;
+}
+
+//После сохранения файла отобразить сколько записей было обработано
+private void SaveComplete(IAsyncResult iAsRes)
+{
+     AsyncResult ar = (AsyncResult)iAsRes; //получить обьект AsyncResult
+     Func<string, ListViewItem[], int> dg = (Func<string, ListViewItem[], int>)ar.AsyncDelegate; //получить делегат
+
+     //получить возвращаемое значение через EndInvoke
+     MessageBox.Show(this, "Сохранено " + (dg.EndInvoke(iAsRes)).ToString() + " записей", "Инфо", MessageBoxButtons.OK, MessageBoxIcon.Information);
+}
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+
+
++-+-+-+-+-+-+-+-+-+-+-Способ 2. Создать поток и снегерировать XML во вторичном потоке-+-+-+-+-+-+-+-+-+-+-+-+-+-
+SaveListToFileThread st = new SaveListToFileThread(items, xmlFileName);
+st.Run();
+
+//Класс SaveListToFileThread
+
+public class SaveListToFileThread
+    {
+        private Thread thread = null; //поток
+        saveObj obj;                  //объект сохранения (содержит ссылку на массив записей и имя XML файла)
+
+        public SaveListToFileThread(ListViewItem[] set, string name)
+        {
+	          //Создать поток, используя делегат ParameterizedThreadStart, который позволяет передать один аргумент типа object
+            thread = new Thread(new ParameterizedThreadStart(SaveResultToXML)); 
+
+            //Присвоить потоку имя
+            thread.Name = "saveToXMLThread";
+
+            //Создать обьект для сохранения
+            obj = new saveObj(set, name);
+        }
+
+        //Запуск процесса сохранения
+        public void Run() 
+        {
+            thread.Start(obj); //saveObj запаковывается в object
+        }
+
+        //Процесс сохранения
+        protected void SaveResultToXML(object so) 
+        {
+            saveObj obj = (saveObj)so; //Распаковать saveObj
+            int rowID = 0; //ID файла в документе начинается с нуля
+
+            //Создать новый XML-документ с главным тэгом
+            XElement seacrhSessionDoc = new XElement("SearchResult");
+
+            //Каждую запись добавить в XML-документ
+            foreach (ListViewItem row in obj.ItemsSet)
+            {
+                XElement newElement = new XElement("FileInfo", new XAttribute("ID", rowID.ToString()),
+                    new XElement("Path", row.SubItems[0].Text),
+                    new XElement("Name", row.SubItems[1].Text),
+                    new XElement("Size", row.SubItems[2].Text),
+                    new XElement("Extention", row.SubItems[3].Text),
+                    new XElement("CreationDate", row.SubItems[4].Text));
+
+                seacrhSessionDoc.Add(newElement);
+                rowID++;
+            }
+
+            //Сохранить XML-документ
+            string savePath = Application.StartupPath + "\\SearchLogs\\" + obj.Text + ".xml";
+            seacrhSessionDoc.Save(savePath);
+        }
+    }
+
+    public class saveObj
+    {
+        ListViewItem[] items; //массив записей
+        string text;          //имя будущего файла
+
+        public saveObj(ListViewItem[] arr, string s)
+        {
+            ItemsSet = arr;
+            Text = s;
+        }
+
+        public ListViewItem[] ItemsSet
+        {
+            set { items = value; }
+            get { return items; }
+        }
+
+        public string Text
+        {
+            set { text = value; }
+            get { return text; }
+        }
+    }
+   
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
