@@ -1,0 +1,206 @@
+В дизайнере формы
+................................................................
+private System.ComponentModel.BackgroundWorker backgroundWorker1;
+[другие детали опущены]
+................................................................
+
+В теле класса FormSearch
+................................................................
+/*Синхронизирующий токен*/
+private object lockToken = new object();
+[другие детали опущены]
+................................................................
+
+
+В конструкторе формы FormSearch
+public FormSearch(SearchMode searchID)
+        {
+            ...........................
+            InitializeBackgroundWorker();
+            ...........................
+	          [другие детали опущены]
+        }
+
+//Инициализация фонового потока
+private void InitializeBackgroundWorker()
+        {
+            //функция, с выполнения которой поток начинает свою работу
+            backgroundWorker1.DoWork += new DoWorkEventHandler(backgroundWorker1_DoSearch);
+            
+            //функция, для сообщения прогресса поиска в первичный поток
+            backgroundWorker1.ProgressChanged += new ProgressChangedEventHandler(backgroundWorker1_ShowSearchProgress);
+            
+            //функция, вызываемая после завершения backgroundWorker1_DoSearch
+            backgroundWorker1.RunWorkerCompleted += new RunWorkerCompletedEventHandler(backgroundWorker1_SearchDone);
+            
+            //Включение поддержки прекращения работы фонового потока и возможности сообщения результата поиска
+            backgroundWorker1.WorkerReportsProgress = true;
+            backgroundWorker1.WorkerSupportsCancellation = true;
+        }
+
+//Работа фонового потока: поиск файлов и папок
+private void backgroundWorker1_DoSearch(object sender, DoWorkEventArgs e)
+        {
+            lock(lockToken)
+            {
+                SearchObject searchObj = new SearchObject(); //обьект для передачи в первичный поток
+                Queue<string> queue = new Queue<string>();   //очередь директорий
+                string currentPath = searchPath;	     //текущий путь поиска
+                int amount = 0;				     //количество найденных файлов
+
+                queue.Enqueue(searchPath);		     //поместить в очередь начальный путь
+
+                do
+                {
+                    currentPath = queue.Dequeue(); //извлечь очередной путь из очереди
+                    DirectoryInfo currentDirectory = new DirectoryInfo(currentPath); //создать на его основе типизированный объект директории
+
+
+                    foreach (FileInfo file in GetNextFile(ref currentDirectory, userMask)) //для каждого файла в текущей директории
+                    {
+                        amount++;						//увеличить счетчик файлов
+                        searchObj.currentSearchObject = searchTarget.File;	//пометить обьект поиска как файл
+                        searchObj.File = file;					//сохранить ссылку на файл
+
+                        Monitor.Pulse(lockToken);                               //разблокировать токен чтобы основной поток мог им завладеть
+                        backgroundWorker1.ReportProgress(amount, searchObj);    //вернуться в основной поток и отобразить текущий файл
+                        Monitor.Wait(lockToken);                                //ждать пока основной поток отобразит результаты
+
+                        if (backgroundWorker1.CancellationPending == true)      //если поступила сигнал о завершении фонового потока - останвоить его и завершить поиск
+                        {
+                            e.Cancel = true;
+                            return;
+                        }
+                    }
+
+                    foreach (var directory in GetNextDirectory(ref currentDirectory)) //для каждой директории в текущей директории
+                    {
+                        if (backgroundWorker1.CancellationPending == true)      //если поступила сигнал о завершении фонового потока - останвоить его и завершить поиск
+                        {
+                            e.Cancel = true;
+                            return;
+                        }
+
+                        queue.Enqueue(directory.FullName);			//поместить директорию в очередь
+
+                        searchObj.currentSearchObject = searchTarget.Path;	//пометить обьект поиска как путь
+                        searchObj.CurrentPath = directory.FullName;		//сохранить имя директории
+
+                        Monitor.Pulse(lockToken);                               //разблокировать токен чтобы основной поток мог им завладеть
+                        backgroundWorker1.ReportProgress(amount, searchObj);    //вернуться в основной поток и отобразить текущую папку поиска
+                        Monitor.Wait(lockToken);                                //ждать пока основной поток отобразит результаты
+                    }
+
+                } while (queue.Any()); //пока в очереди есть директории ожидающие рассмотрения
+
+                Monitor.Pulse(lockToken); //освободить синхронизирующий токен
+            }
+
+        }
+
+
+private void backgroundWorker1_ShowSearchProgress(object sender, ProgressChangedEventArgs e)
+        {
+            lock(lockToken) //захватить синхронизирующий токен
+            {
+                SearchObject so = (SearchObject)e.UserState;                 //извлечь обьект поиска
+
+                //Если передан файл
+                if(so.currentSearchObject == searchTarget.File)
+                {
+                    //Извлечь файл и проанализировать его согласно текущему режиму поиска
+                    FileInfo currFile = ((SearchObject)e.UserState).File;
+
+                    switch (sMode)
+                    {
+                        case SearchMode.byManual:
+                            UpdateControls_ByManual(ref currFile);
+                            break;
+                        case SearchMode.ByCategory:
+                            UpdateControls_ByCategory(ref currFile);
+                            break;
+                        case SearchMode.byText:
+                            UpdateControls_ByText(ref currFile);
+                            break;
+                    }
+                }
+                //Если передана директория
+                if(so.currentSearchObject == searchTarget.Path)
+                {
+                    //Извлечь путь и отобразить его
+                    string fullPath = so.CurrentPath;
+
+                    IntermediatePath.Text = fullPath.Length >= MAX_DIRECTORY_LENGTH ?
+                                            string.Format("Путь: {0}", fullPath.Substring(0, MAX_DIRECTORY_LENGTH - 1)) :
+                                            string.Format("Путь: {0}", fullPath);
+                }
+
+                Monitor.Pulse(lockToken); //Освободить токен для фонового потока (поиск файлов продолжится)
+            }
+        }
+
+//Когда поиск завершен
+private void backgroundWorker1_SearchDone(object sender, RunWorkerCompletedEventArgs e)
+        {
+            UnlockControls();   //разблокировать элементы управления
+
+            //Сообщить о том, что поиск завершен (в label и модальным окном)
+            IntermediatePath.Text = "Поиск завершен";
+            MessageBox.Show(this, "Поиск завершен", "Инфо", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+//Получение очередной директории в текущей
+        private IEnumerable<DirectoryInfo> GetNextDirectory(ref DirectoryInfo dir)
+        {
+            try
+            {
+                return dir.EnumerateDirectories();
+            }
+            catch(Exception ignoreProblemFile) //игнорировать проблемные директории
+            {
+                //MessageBox.Show("Bad!");
+            }
+
+            return Enumerable.Empty<DirectoryInfo>();
+        }
+
+//Получение очередного файла в текущей директории
+        private IEnumerable<FileInfo> GetNextFile(ref DirectoryInfo dir, string sFormat)
+        {
+            try
+            {
+                return dir.EnumerateFiles(sFormat);
+            }
+            catch(Exception ignoreProblemDirectory)
+            {
+                //MessageBox.Show("Bad!");
+            }
+
+            return Enumerable.Empty<FileInfo>();
+        }
+
+//Способы остановки фонового потока
+//1.    Обработка попыток закрытия окна*/
+        private void FormSearch_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            /*Обработка двух случаев: поиск еще не начался или уже завершен, поиск в процессе*/
+
+            if (!backgroundWorker1.IsBusy)                                //если поиск не в процессе
+            {
+                e.Cancel = false;                                         //разрешается закрытие формы
+                this.RestoreFormParams();                                 //обнулить статические параметры формы
+            }
+            else
+            {
+                e.Cancel = true;                                          //не разрешается закрытие формы
+                if (backgroundWorker1.WorkerSupportsCancellation == true) //если отмена предусмотрена
+                    backgroundWorker1.CancelAsync();                      //завершить фоновой поток
+            } 
+        }
+
+//2. Завершение по нажатию на кнопку
+        private void buttonAbortSearch_MouseClick(object sender, MouseEventArgs e)
+        {
+            FormClosingEventArgs eClose = new FormClosingEventArgs(CloseReason.UserClosing, true);
+            FormSearch_FormClosing(this, eClose);
+        }
