@@ -41,5 +41,5 @@
 
                 progress.Report(nextItem); //поместить очередную запись в список в основном потоке
             }
-            return Task.FromResult(amountOfFiles); //вернуть количество считанным записей
+            return Task.FromResult(amountOfFiles); //вернуть количество считаных записей
         }
