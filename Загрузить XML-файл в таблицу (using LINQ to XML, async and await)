@@ -1,4 +1,4 @@
-        //Загрузить XML в таблицу ассинхронно
+        //Загрузить XML в таблицу асинхронно
         private async void ShowTableAsync(XDocument doc)
         {
 
