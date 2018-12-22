@@ -8,21 +8,32 @@ private System.ComponentModel.BackgroundWorker backgroundWorker1;
 ................................................................
 /*Синхронизирующий токен*/
 private object lockToken = new object();
+
+/*Синхронизирующий флаг: для режима поиска по тексту*/
+private bool bFileReadInProgress = false;
+
+/*Делегат для обработки файла: будет использоваться для входа в функцию анализа файла (при режиме поиска по тексту) в асинхронном режиме*/
+ Action<FileInfo> fileAnalizeAsync;
+ 
 [другие детали опущены]
 ................................................................
 
 
-В конструкторе формы FormSearch
-public FormSearch(SearchMode searchID)
+        //В конструкторе формы FormSearch
+        public FormSearch(SearchMode searchID)
         {
             ...........................
+	    //Инициализация воркера
             InitializeBackgroundWorker();
+	    
+	    //Регистрация обработчика файла (будет задействован в режиме поиска по тексту)
+            fileAnalizeAsync = UpdateControls_ByText;
             ...........................
 	          [другие детали опущены]
         }
 
-//Инициализация фонового потока
-private void InitializeBackgroundWorker()
+        //Инициализация фонового потока
+        private void InitializeBackgroundWorker()
         {
             //функция, с выполнения которой поток начинает свою работу
             backgroundWorker1.DoWork += new DoWorkEventHandler(backgroundWorker1_DoSearch);
@@ -38,11 +49,11 @@ private void InitializeBackgroundWorker()
             backgroundWorker1.WorkerSupportsCancellation = true;
         }
 
-//Работа фонового потока: поиск файлов и папок
-private void backgroundWorker1_DoSearch(object sender, DoWorkEventArgs e)
+        //Работа фонового потока: поиск файлов и папок
+        private void backgroundWorker1_DoSearch(object sender, DoWorkEventArgs e)
         {
-            lock(lockToken)
-            {
+		Monitor.Enter(lockToken); 		     //захватить синхронизирующий 
+		
                 SearchObject searchObj = new SearchObject(); //обьект для передачи в первичный поток
                 Queue<string> queue = new Queue<string>();   //очередь директорий
                 string currentPath = searchPath;	     //текущий путь поиска
@@ -65,6 +76,28 @@ private void backgroundWorker1_DoSearch(object sender, DoWorkEventArgs e)
                         Monitor.Pulse(lockToken);                               //разблокировать токен чтобы основной поток мог им завладеть
                         backgroundWorker1.ReportProgress(amount, searchObj);    //вернуться в основной поток и отобразить текущий файл
                         Monitor.Wait(lockToken);                                //ждать пока основной поток отобразит результаты
+			
+			/*После освобождения токена в фукнции ReportProgress поток поиска файлов возобновляет свою работу, однако,
+			  если мы находимся в режиме поиска по тексту необходимо снова остановить поток поиска файлов и дать возможность
+			  получить синхронизирующий токен потоку чтения конкретного файл и продолжить рабоут только когда чтение завершено.
+			  
+			  Вот как это выполнено: в режиме поиска по тексту до вызова функции чтения файла в функции ReportProgress 
+			  флаг bFileReadInProgress устанвливается в значение true, асинхроно
+			  (т.к. файл может быть большим и анализ в основном потоке остановит возможность взаимодействия с GUI) вызывается 
+			  функция чтения файла, в контексте которой выполняется попытка получить синхронизирующий токен, а тем временем
+			  управление возвращается в функцию  ReportProgress. В этот момент, поток поиска файлов еще ждет, а поток чтения файла еще не получил
+			  токен т.к. в  функции ReportProgress токен еще не освобожден. После освобождения синхронизирующего токена сперва возобновляется работа
+			  потока поиска файлов, но далее следует цикл, после входа в который (вход произойдет т.к. bFileReadInProgress установлен
+			  в true) поток поиска файлов приостанавливается и освобождает токен, не расходуя при этом процессорное время во время выполнения 
+			  другого потока. Поток чтения файла захватывает синхронизирующий токен, выполняет чтения файла не блокируя работу GUI-потока и 
+			  после завершения сбрасывает флаг и освобождает синхронизирующий токен. Поток поиска файлов возобновляет свою работу и выходит из 
+			  цикла ожидания, выполняя поиск следующего файла.
+			  
+			while(bFileReadInProgress)
+                        {
+                            /*Wait for read file thread*/
+                            Monitor.Wait(lockToken);
+                        }
 
                         if (backgroundWorker1.CancellationPending == true)      //если поступил сигнал о завершении фонового потока - останвоить его и завершить поиск
                         {
@@ -93,16 +126,14 @@ private void backgroundWorker1_DoSearch(object sender, DoWorkEventArgs e)
 
                 } while (queue.Any()); //пока в очереди есть директории ожидающие рассмотрения
 
-                Monitor.Pulse(lockToken); //освободить синхронизирующий токен
-            }
-
+                 Monitor.Exit(lockToken); //освободить синхронизирующий токен
         }
 
 
-private void backgroundWorker1_ShowSearchProgress(object sender, ProgressChangedEventArgs e)
+        private void backgroundWorker1_ShowSearchProgress(object sender, ProgressChangedEventArgs e)
         {
-            lock(lockToken) //захватить синхронизирующий токен
-            {
+            	Monitor.Enter(lockToken); //захватить токен
+		
                 SearchObject so = (SearchObject)e.UserState;                 //извлечь обьект поиска
 
                 //Если передан файл
@@ -120,7 +151,8 @@ private void backgroundWorker1_ShowSearchProgress(object sender, ProgressChanged
                             UpdateControls_ByCategory(ref currFile);
                             break;
                         case SearchMode.byText:
-                            UpdateControls_ByText(ref currFile);
+                            bFileReadInProgress = true; //сигнал для потока поиска файлов о том, что начнется чтения файла (поток чтения файлов будет снова приостановлен после возобновления своей работы, давая возможность сначала отработать потоку чтения файла, а сам ждет)
+                            fileAnalizeAsync.BeginInvoke(currFile, null, null); //Запустить анализ файла асинхронно
                             break;
                     }
                 }
@@ -139,8 +171,8 @@ private void backgroundWorker1_ShowSearchProgress(object sender, ProgressChanged
             }
         }
 
-//Когда поиск завершен
-private void backgroundWorker1_SearchDone(object sender, RunWorkerCompletedEventArgs e)
+        //Когда поиск завершен
+        private void backgroundWorker1_SearchDone(object sender, RunWorkerCompletedEventArgs e)
         {
             UnlockControls();   //разблокировать элементы управления
 
@@ -149,7 +181,7 @@ private void backgroundWorker1_SearchDone(object sender, RunWorkerCompletedEvent
             MessageBox.Show(this, "Поиск завершен", "Инфо", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-//Получение очередной директории в текущей
+        //Получение очередной директории в текущей
         private IEnumerable<DirectoryInfo> GetNextDirectory(ref DirectoryInfo dir)
         {
             try
@@ -164,7 +196,7 @@ private void backgroundWorker1_SearchDone(object sender, RunWorkerCompletedEvent
             return Enumerable.Empty<DirectoryInfo>();
         }
 
-//Получение очередного файла в текущей директории
+        //Получение очередного файла в текущей директории
         private IEnumerable<FileInfo> GetNextFile(ref DirectoryInfo dir, string sFormat)
         {
             try
@@ -179,8 +211,8 @@ private void backgroundWorker1_SearchDone(object sender, RunWorkerCompletedEvent
             return Enumerable.Empty<FileInfo>();
         }
 
-//Способы остановки фонового потока
-//1.    Обработка попыток закрытия окна*/
+        //Способы остановки фонового потока
+        //1.    Обработка попыток закрытия окна*/
         private void FormSearch_FormClosing(object sender, FormClosingEventArgs e)
         {
             /*Обработка двух случаев: поиск еще не начался или уже завершен, поиск в процессе*/
@@ -198,9 +230,49 @@ private void backgroundWorker1_SearchDone(object sender, RunWorkerCompletedEvent
             } 
         }
 
-//2. Завершение по нажатию на кнопку
+        //2. Завершение по нажатию на кнопку
         private void buttonAbortSearch_MouseClick(object sender, MouseEventArgs e)
         {
             FormClosingEventArgs eClose = new FormClosingEventArgs(CloseReason.UserClosing, true);
             FormSearch_FormClosing(this, eClose);
+        }
+	
+	
+	//Обновление формы при поиске по маске
+	private void UpdateControls_ByManual(ref FileInfo curr_file)
+        {
+            /*Обновить список и текстовые поля*/
+            UdpateSearchForm(curr_file, ++fileCounter);
+        }
+
+        //Обновление формы при поиске по категориям
+        private void UpdateControls_ByCategory(ref FileInfo curr_file)
+        {
+            if(!categorySearchAllFilesChecked)
+            {
+                if (curr_file.FileExtensionRequired(ref listOfRequiredExtensions) == false)
+                    return;
+            }
+
+            UdpateSearchForm(curr_file, ++fileCounter);
+        }
+
+        //Обновление формы при поиске по тексту
+        private void UpdateControls_ByText(FileInfo curr_file)
+        {
+            Monitor.Enter(lockToken); //захватить синхронизирующий токен
+           if (curr_file.FileExtensionRequired(ref listOfRequiredExtensions) &&
+               curr_file.ContainRequiredString(ref requiredString))
+           {
+	   	//Окно в первичный поток: добавить файл в таблицу, если он прошел обе проверки
+               this.Invoke(new Action(() =>
+                {
+                     UdpateSearchForm(curr_file, ++fileCounter);
+                }));
+           }
+	    
+	    //Чтение завершено: сбросить флаг, чтения освободить токен. В результате чего поток поиска файлов возобновит свою работу
+            bFileReadInProgress = false;
+            Monitor.Pulse(lockToken);
+            Monitor.Exit(lockToken);
         }
