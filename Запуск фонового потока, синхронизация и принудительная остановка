@@ -276,3 +276,35 @@ private bool bFileReadInProgress = false;
             Monitor.Pulse(lockToken);
             Monitor.Exit(lockToken);
         }
+	
+	//Функция обновления формы
+	private void UdpateSearchForm(FileInfo curr_file, int counter)
+        {
+            /*Обновить список и текстовые поля*/
+            string pathText;
+            try
+            {
+                pathText = curr_file.Directory.Root + curr_file.Directory.Name;
+            }
+            catch (Exception ignoreBadDirectoryLength)
+            {   /*Игнорировать директории с длинными именами (больше 248 символов)*/
+                return;
+            }
+
+            /*Добавить информацию о поиске в текстовые поля*/
+            IntermediatePath.Text = pathText.Length >= MAX_DIRECTORY_LENGTH ?
+                string.Format("Путь: {0}", pathText.Substring(0, MAX_DIRECTORY_LENGTH - 1)) :
+                string.Format("Путь: {0}", pathText);
+            IntermediateAmount.Text = string.Format("Количество: {0}", counter.ToString());
+
+            /*Добавить информацию о файле в список*/
+            var item1 = new ListViewItem(new[]
+            {
+                                curr_file.Directory.ToString(),
+                                curr_file.Name,
+                                (curr_file.Length / 1024).ToString(),
+                                curr_file.Extension,
+                                curr_file.CreationTime.ToShortDateString()
+            });
+            listView1.Items.Add(item1);
+        }
