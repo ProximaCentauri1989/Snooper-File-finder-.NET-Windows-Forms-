@@ -188,9 +188,12 @@ private bool bFileReadInProgress = false;
             {
                 return dir.EnumerateDirectories();
             }
-            catch(Exception ignoreProblemFile) //игнорировать проблемные директории
+            catch(Exception problemDirEx)
             {
-                //MessageBox.Show("Bad!");
+                using (StreamWriter sw = new StreamWriter(pathToFileErrorLogs)) //обновить журнал ошибок доступа к директориям/файлам
+                {
+                    sw.WriteLine("[DIR Error " + DateTime.Now.ToLocalTime() + "]: " + problemDirEx.Message);
+                }
             }
 
             return Enumerable.Empty<DirectoryInfo>();
@@ -203,9 +206,12 @@ private bool bFileReadInProgress = false;
             {
                 return dir.EnumerateFiles(sFormat);
             }
-            catch(Exception ignoreProblemDirectory)
+            catch(Exception problemFileEx)
             {
-                //MessageBox.Show("Bad!");
+                using (StreamWriter sw = new StreamWriter(pathToFileErrorLogs)) //обновить журнал ошибок доступа к директориям/файлам
+                {
+                    sw.WriteLine("[FILE Error " + DateTime.Now.ToLocalTime() + "]: " + problemFileEx.Message);
+                }
             }
 
             return Enumerable.Empty<FileInfo>();
