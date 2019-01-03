@@ -1,4 +1,58 @@
-+-+-+-+-+-+-+-Способ 1. Используя асинхронную природу делегатов (без создания нового потока вручную)-+-+-+-+-+-
+ +-+-+-+-+-+-+-Способ 1. Используя ключевые слова async, await-+-+-+-+-+-
+ private async void buttonSaveToXML_Click(object sender, EventArgs e) //функция помечена как async
+        {
+            if (listView1.Items.Count > 0)
+            {
+                if (!bAlreadySave)
+                {
+                    string xmlFileName = GenerateXMLFileName();
+
+                    ListViewItem[] items = new ListViewItem[listView1.Items.Count];
+                    listView1.Items.CopyTo(items, 0);
+
+                    await Task.Run(() =>  SaveXMLAsync(items, xmlFileName)); //<--- запуск сохранения в XML во вторичном потоке не прибегая к созданию делегата Func
+
+                    AddSearchResultToMainList(xmlFileName); //данная функция  вплотную работает с таблицей в первичном потоке и выполняется быстро (поэтому запукскается без использования await) 
+                    bAlreadySave = true;
+
+                    MessageBox.Show(this, "Сохранено " + items.Length + " записей", "Инфо", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            else
+                MessageBox.Show(this, "Список файлов пуст", "Инфо", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+//Формирование XML-файла во вторичном потоке (в данном случае функция возвращает void)
+private void SaveXMLAsync(string xmlName, ListViewItem[] lwi)
+{
+     int rowID = 0; //ID файла в документе
+
+     //Создать новый XML-документ с главным тэгом
+     XElement seacrhSessionDoc = new XElement("SearchResult");
+
+     //Каждую строку добавить в XML-документ
+     foreach (ListViewItem row in lwi)
+     {
+           XElement newElement = new XElement("FileInfo", new XAttribute("ID", rowID.ToString()),
+                    new XElement("Path", row.SubItems[0].Text),
+                    new XElement("Name", row.SubItems[1].Text),
+                    new XElement("Size", row.SubItems[2].Text),
+                    new XElement("Extention", row.SubItems[3].Text),
+                    new XElement("CreationDate", row.SubItems[4].Text));
+
+           seacrhSessionDoc.Add(newElement);
+           rowID++;
+     }
+
+     //Сохранить XML-документ
+     string savePath = GetSavePath(xmlName);
+     seacrhSessionDoc.Save(savePath);
+
+     return rowID;
+}
+
+
++-+-+-+-+-+-+-Способ 2. Используя асинхронную природу делегатов (без создания нового потока вручную)-+-+-+-+-+-
 
 SaveResultToXML(items, xmlFileName); //Вызов функции сохранения
 
@@ -14,7 +68,7 @@ private void SaveResultToXML(ListViewItem[] listItems, string xmlFN)
      delegateSaveXML.BeginInvoke(xmlFN, listItems, new AsyncCallback(SaveComplete), null);
  }
 
-//Формирование XML-файла во вторичном потоке
+//Формирование XML-файла во вторичном потоке (тут функция возвращает количество записанных строк таблицы, которое используется в функции SaveComplete)
 private int SaveXMLAsync(string xmlName, ListViewItem[] lwi)
 {
      int rowID = 0; //ID файла в документе
@@ -50,7 +104,7 @@ private void SaveComplete(IAsyncResult iAsRes)
      Func<string, ListViewItem[], int> dg = (Func<string, ListViewItem[], int>)ar.AsyncDelegate; //получить делегат
 
      //получить возвращаемое значение через EndInvoke
-     if (this.InvokeRequired)
+     if (this.InvokeRequired) //Если мы работаем во вторичном потоке попытка отобразить окно с привязкой к форме(передавая this) созданной в первичном потоке вызовет ошибку времени выполнения
      {
           this.Invoke(new Action(() =>
           {
@@ -63,7 +117,7 @@ private void SaveComplete(IAsyncResult iAsRes)
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
 
 
-+-+-+-+-+-+-+-+-+-+-+-Способ 2. Создать поток и снегерировать XML во вторичном потоке-+-+-+-+-+-+-+-+-+-+-+-+-+-
++-+-+-+-+-+-+-+-+-+-+-Способ 3. Создать поток и снегерировать XML во вторичном потоке-+-+-+-+-+-+-+-+-+-+-+-+-+-
 SaveListToFileThread st = new SaveListToFileThread(items, xmlFileName);
 st.Run();
 
