@@ -50,7 +50,15 @@ private void SaveComplete(IAsyncResult iAsRes)
      Func<string, ListViewItem[], int> dg = (Func<string, ListViewItem[], int>)ar.AsyncDelegate; //получить делегат
 
      //получить возвращаемое значение через EndInvoke
-     MessageBox.Show(this, "Сохранено " + (dg.EndInvoke(iAsRes)).ToString() + " записей", "Инфо", MessageBoxButtons.OK, MessageBoxIcon.Information);
+     if (this.InvokeRequired)
+     {
+          this.Invoke(new Action(() =>
+          {
+               MessageBox.Show(this, "Сохранено " + (dg.EndInvoke(iAsRes)).ToString() + " записей", "Инфо", MessageBoxButtons.OK, MessageBoxIcon.Information);
+          }));
+     }
+     else
+          MessageBox.Show(this, "Сохранено " + (dg.EndInvoke(iAsRes)).ToString() + " записей", "Инфо", MessageBoxButtons.OK, MessageBoxIcon.Information);
 }
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
 
